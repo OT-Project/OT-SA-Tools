@@ -63,6 +63,7 @@ ROOTDIR?=	/usr
 
 TOOLSDIR?=	${ROOTDIR}/tools
 TOOLSBRANCH?=	master
+REPOSCONFIG?=	repositories
 
 _OS!=	uname -r
 _OS:=	${_OS:C/-.*//}
@@ -196,7 +197,8 @@ ${STEP}: lint-steps
 	    -H "${COREENV}" -u "${UEFI:tl}" -U "${SUFFIX}" \
 	    -V "${ADDITIONS}" -O "${GITBASE}"  -r "${SERVER}" \
 	    -h "${PLUGINSENV}" -I "${REMOTEDIR}" -D "${EXTRABRANCH}" \
-	    -A "${PORTSREFURL}" -J "${PORTSENV}" ${${STEP}_ARGS}
+	    -A "${PORTSREFURL}" -J "${PORTSENV}" -X "${_CONFIGDIR}/${REPOSCONFIG}" \
+	    ${${STEP}_ARGS}
 .endfor
 
 .for SCRIPT in ${SCRIPTS}

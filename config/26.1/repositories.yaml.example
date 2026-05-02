@@ -1,0 +1,33 @@
+# OT-SA-Tools Repository Configuration
+# Location: config/26.1/repositories.yaml
+# Usage: Copy this file to repositories.yaml and customize as needed
+
+# Base URL cho tất cả repositories
+# Được dùng để xây dựng URL nếu không chỉ định explicit
+# Ví dụ: git_base: https://github.com/opnsense → core sẽ là https://github.com/opnsense/core
+git_base: https://github.com/opnsense
+
+# Repositories tuỳ chỉnh (override git_base nếu cần)
+# Format: <repo_name>: <url>
+# Để trống hoặc dùng 'null' = sẽ tự động xây dựng từ git_base/<repo_name>
+repositories:
+  # OT-SA repositories (mặc định từ git_base)
+  core: null      # null → https://github.com/opnsense/core
+  plugins: null   # null → https://github.com/opnsense/plugins
+  ports: null     # null → https://github.com/opnsense/ports
+  src: null       # null → https://github.com/opnsense/src
+  tools: null     # null → https://github.com/opnsense/tools
+
+  # FreeBSD ports repository (khác origin - luôn có explicit URL)
+  portsref: https://git.FreeBSD.org/ports.git
+
+# Mirror URLs cho distfiles và prefetch
+# Được dùng bởi: make prefetch-<set>, make clone-<set> TO=<version>
+# Nếu không định nghĩa, mặc định sẽ dùng OPNsense official mirrors
+mirrors:
+  - https://opnsense.c0urier.net
+  - https://mirrors.nycbug.org/pub/opnsense
+  - https://mirror.wdc1.us.leaseweb.net/opnsense
+  - https://mirror.sfo12.us.leaseweb.net/opnsense
+  - https://mirror.fra10.de.leaseweb.net/opnsense
+  - https://mirror.ams1.nl.leaseweb.net/opnsense

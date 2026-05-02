@@ -1,0 +1,109 @@
+# ==============================================================================
+# OT-SA-Tools Local Build Configuration Override (ABI 26.1)
+# ==============================================================================
+#
+# >>> ĐÂY LÀ FILE TEMPLATE - COPY THÀNH `build.conf.local` ĐỂ DÙNG <<<
+#
+# Cách dùng:
+#   cp build.conf.local.example build.conf.local
+#   vim build.conf.local
+#
+# File `build.conf.local` KHÔNG được commit vào git (đã thêm vào .gitignore).
+# Cấu hình ở đây CHỈ ÁP DỤNG TRÊN MÁY CỦA BẠN, không ảnh hưởng team.
+#
+# QUY TẮC QUAN TRỌNG:
+#   - LUÔN dùng `=` (force set), KHÔNG dùng `?=`
+#   - Vì file này được load TRƯỚC build.conf, nếu dùng ?= thì khi build.conf
+#     load sau cũng dùng ?= sẽ giữ nguyên giá trị → override không hiệu lực
+#
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 1: Thử nghiệm phiên bản ngôn ngữ mới
+# ------------------------------------------------------------------------------
+# Bỏ comment để dùng:
+
+#PYTHON=312                # Thử Python 3.12 thay vì 3.11 mặc định
+#PHP=84                    # Thử PHP 8.4
+#RUBY=34                   # Thử Ruby 3.4
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 2: Build cho fork riêng / mirror nội bộ
+# ------------------------------------------------------------------------------
+
+#GITBASE=https://github.com/my-username
+#PORTSREFURL=https://git.internal.local/freebsd-ports.git
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 3: Tuỳ biến tên sản phẩm cá nhân
+# ------------------------------------------------------------------------------
+
+#NAME=MyTestProduct
+#TYPE=mytest
+#SUFFIX=-devel
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 4: Bật debug / verbose mode
+# ------------------------------------------------------------------------------
+
+#VERBOSE=1                 # Hiển thị mọi lệnh shell khi build
+#DEBUG=debug               # Build kernel với debug symbols
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 5: Cấu hình build cho thiết bị ARM cụ thể
+# ------------------------------------------------------------------------------
+
+#ARCH=aarch64
+#DEVICE=RPI
+#KERNEL=SMP-ARM
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 6: SSH server riêng cho upload/download
+# ------------------------------------------------------------------------------
+
+#SERVER=mydev@build.internal.local
+#REMOTEDIR=/srv/builds/otsa
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 7: Đường dẫn build tuỳ chỉnh (nếu /usr không đủ space)
+# ------------------------------------------------------------------------------
+
+#ROOTDIR=/mnt/build
+#STAGEDIRPREFIX=/mnt/build/obj
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 8: Branches khác cho experiment
+# ------------------------------------------------------------------------------
+
+#COREBRANCH=master
+#PLUGINSBRANCH=master
+#EXTRABRANCH=master         # Nightly với cả release + dev branch
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 9: Signing keys riêng
+# ------------------------------------------------------------------------------
+
+#PRIVKEY=/home/myuser/keys/otsa.key
+#PUBKEY=/home/myuser/keys/otsa.pub
+
+
+# ------------------------------------------------------------------------------
+# Ví dụ 10: Tuỳ chọn build ports
+# ------------------------------------------------------------------------------
+
+#PORTSENV=DEPEND=no PRUNE=no       # Không touch plugin/core, bỏ kiểm tra ports
+#ADDITIONS=net/haproxy security/acme-client    # Plugin bổ sung
+
+
+# ==============================================================================
+# Xem danh sách đầy đủ các biến trong file `build.conf` cùng thư mục.
+# ==============================================================================

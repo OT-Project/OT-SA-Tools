@@ -1,4 +1,5 @@
 /config/*/build.conf.local
 /config/*/plugins.conf.local
+/config/*/repositories.yaml
 /config/*/repo.key
 /config/*/repo.pub

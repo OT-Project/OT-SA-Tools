@@ -28,7 +28,7 @@
 
 set -e
 
-OPTS="A:a:B:b:C:c:D:d:E:e:F:G:g:H:h:I:J:K:k:L:l:m:n:O:o:P:p:R:r:S:s:T:t:U:u:v:V:"
+OPTS="A:a:B:b:C:c:D:d:E:e:F:G:g:H:h:I:J:K:k:L:l:m:n:O:o:P:p:R:r:S:s:T:t:U:u:v:V:X:"
 
 while getopts ${OPTS} OPT; do
 	case ${OPT} in
@@ -166,6 +166,9 @@ while getopts ${OPTS} OPT; do
 	V)
 		export PRODUCT_ADDITIONS=${OPTARG}
 		;;
+	X)
+		export REPOSCONFIG_PATH=${OPTARG}
+		;;
 	*)
 		echo "${0}: Unknown argument '${OPT}'" >&2
 		exit 1
@@ -235,6 +238,11 @@ if [ ! -f ${DEVICEDIR}/${PRODUCT_DEVICE_REAL}.conf ]; then
 fi
 . ${DEVICEDIR}/${PRODUCT_DEVICE_REAL}.conf
 
+# load repositories configuration (YAML)
+if [ -n "${REPOSCONFIG_PATH}" ] && [ -f "${REPOSCONFIG_PATH}.yaml" ]; then
+	load_repositories_config "${REPOSCONFIG_PATH}"
+fi
+
 # get the current version for the selected source repository
 SRCREVISION=unknown
 if [ -f ${SRCDIR}/sys/conf/newvers.sh ]; then
@@ -300,6 +308,92 @@ for WANT in ${PRODUCT_WANTS}; do
 		exit 1
 	fi
 done
+
+# Parse YAML repositories configuration (shell-native)
+parse_yaml_repositories()
+{
+	local yaml_file="${1}"
+	local section=""
+
+	[ ! -f "${yaml_file}" ] && return 1
+
+	while IFS= read -r line; do
+		# Skip comment and blank lines
+		case "${line}" in
+		'#'*|'')
+			continue
+			;;
+		esac
+
+		# Parse git_base (top-level key)
+		case "${line}" in
+		git_base:*)
+			GIT_BASE=$(echo "${line}" | sed 's/^[a-z_]*:[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//')
+			section="git_base"
+			continue
+			;;
+		repositories:*)
+			section="repositories"
+			continue
+			;;
+		mirrors:*)
+			section="mirrors"
+			continue
+			;;
+		esac
+
+		# Parse repositories (key-value pairs with indent)
+		if [ "${section}" = "repositories" ]; then
+			case "${line}" in
+			[[:space:]]*[a-z_]*:*)
+				repo_name=$(echo "${line}" | sed 's/^[[:space:]]*//;s/[[:space:]]*:[[:space:]].*//')
+				repo_url=$(echo "${line}" | sed 's/^[[:space:]]*[a-z_]*:[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//')
+
+				if [ "${repo_url}" != "null" ] && [ -n "${repo_url}" ]; then
+					eval "export REPO_$(echo ${repo_name} | tr 'a-z' 'A-Z')='${repo_url}'"
+				fi
+				;;
+			esac
+		fi
+
+		# Parse mirrors (list items with dash)
+		if [ "${section}" = "mirrors" ]; then
+			case "${line}" in
+			[[:space:]]*'- '*)
+				mirror_url=$(echo "${line}" | sed 's/^[[:space:]]*-[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//')
+				if [ -n "${mirror_url}" ]; then
+					CUSTOM_MIRRORS="${CUSTOM_MIRRORS} ${mirror_url}"
+				fi
+				;;
+			esac
+		fi
+	done < "${yaml_file}"
+
+	# Trim CUSTOM_MIRRORS
+	if [ -n "${CUSTOM_MIRRORS}" ]; then
+		CUSTOM_MIRRORS=$(echo "${CUSTOM_MIRRORS}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+	fi
+}
+
+# Load repositories configuration (YAML)
+load_repositories_config()
+{
+	local config_path="${1}"
+
+	if [ -f "${config_path}.yaml" ]; then
+		parse_yaml_repositories "${config_path}.yaml"
+	fi
+
+	# Set GITBASE if GIT_BASE was parsed
+	if [ -n "${GIT_BASE}" ]; then
+		export PRODUCT_GITBASE="${GIT_BASE}"
+	fi
+
+	# Set MIRRORS if CUSTOM_MIRRORS was parsed
+	if [ -n "${CUSTOM_MIRRORS}" ]; then
+		export PRODUCT_MIRROR="${CUSTOM_MIRRORS}"
+	fi
+}
 
 git_reset()
 {

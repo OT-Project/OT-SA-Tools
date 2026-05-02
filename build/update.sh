@@ -75,6 +75,15 @@ for ARG in ${ARGS}; do
 		;;
 	esac
 
+	# Try to get custom URL from repositories.yaml config (REPO_<name>)
+	if [ -z "${URL}" ]; then
+		repo_name=$(echo "${ARG}" | tr 'a-z' 'A-Z')
+		eval "CUSTOM_URL=\${REPO_${repo_name}}"
+		if [ -n "${CUSTOM_URL}" ]; then
+			URL="${CUSTOM_URL}"
+		fi
+	fi
+
 	git_clone ${DIR} "${URL}"
 	git_fetch ${DIR}
 	for BRANCH in ${BRANCHES}; do
