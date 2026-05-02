@@ -218,7 +218,7 @@ Các tuỳ chọn được truyền qua dòng lệnh hoặc thiết lập trong 
 |----------|----------|-------|
 | `SETTINGS` | (tự động) | Tên profile cấu hình — chọn thư mục `config/<tên>/` tương ứng |
 | `CONFIGDIR` | (tự động) | Đường dẫn tuyệt đối tới thư mục cấu hình (ghi đè `SETTINGS`) |
-| `ABI` | từ SETTINGS | Chuỗi phiên bản ABI (ví dụ: `25.7`, `26.1`) |
+| `ABI` | từ SETTINGS | Chuỗi phiên bản ABI (ví dụ: `26.1`) |
 | `ADDITIONS` | (trống) | Danh sách gói/plugin bổ sung thêm vào image |
 | `ARCH` | native | Kiến trúc đích: `amd64` hoặc `aarch64` |
 | `COMSPEED` | `115200` | Tốc độ baud của serial console |
@@ -272,7 +272,7 @@ config/<ABI>/
 └── base.obsolete.*     # Danh sách tệp lỗi thời cần xoá khi nâng cấp
 ```
 
-Hiện tại có 2 bộ cấu hình: **25.7** và **26.1** (cả hai đều cho FreeBSD 14.3).
+Hiện tại dùng bộ cấu hình **26.1** (FreeBSD 14.3).
 
 ### Ghi đè cấu hình cục bộ (build.conf.local)
 
@@ -305,7 +305,7 @@ PHP=84                          # Luôn set PHP=84 (override mọi nơi khác)
 **Tạo cấu hình cá nhân:**
 
 ```sh
-# config/25.7/build.conf.local
+# config/26.1/build.conf.local
 
 # Tôi muốn thử nghiệm Python 3.12
 PYTHON=312
@@ -349,10 +349,10 @@ git clone git@github.com:OT-Project/OT-SA-Tools.git tools
 cd tools
 
 # 2. Xem các biến có thể tuỳ chỉnh (đã có comment chi tiết)
-cat config/25.7/build.conf
+cat config/26.1/build.conf
 
 # 3. Tạo cấu hình cá nhân (KHÔNG commit)
-cat > config/25.7/build.conf.local <<EOF
+cat > config/26.1/build.conf.local <<EOF
 GITBASE=https://github.com/OT-Project
 VERBOSE=1
 EOF
@@ -366,43 +366,142 @@ make base kernel
 
 Tệp `plugins.conf.local` cho phép tuỳ chỉnh danh sách plugin cục bộ (cùng cơ chế).
 
-### Cấu hình Repository URL (repositories.yaml)
+### Cấu hình Repository URL + Branch (repositories.yaml)
 
-Để thay đổi URL của git repositories hoặc mirrors (thay vì lấy từ GitHub OPNsense mặc định):
+Để thay đổi URL **và branch** của git repositories qua một file YAML duy nhất:
 
-**Tạo file cấu hình:**
+#### Setup ban đầu
 
 ```bash
-cp config/25.7/repositories.yaml.example config/25.7/repositories.yaml
+cp config/26.1/repositories.yaml.example config/26.1/repositories.yaml
+vim config/26.1/repositories.yaml
 ```
 
-**Sửa file cấu hình (YAML):**
+#### Cấu trúc file (nested format: URL + branch)
 
 ```yaml
-# config/25.7/repositories.yaml
+# config/26.1/repositories.yaml
+
+# Base URL chung (dùng khi url: null)
 git_base: https://github.com/OT-Project
 
 repositories:
-  core: null      # null = sẽ dùng git_base/core
-  plugins: null
-  ports: null
-  src: null
-  tools: null
-  portsref: https://git.FreeBSD.org/ports.git
-
-mirrors:
-  - https://mirror.internal/otsa
-  - https://mirror.backup/otsa
+  core:
+    url: null                    # null = git_base/core
+    branch: null                 # null = stable/${ABI}
+  plugins:
+    url: null
+    branch: null
+  ports:
+    url: https://github.com/OT-Project/OT-Ports    # Override URL
+    branch: develop                                 # Override branch
+  src:
+    url: null
+    branch: null
+  tools:
+    url: null
+    branch: null
+  portsref:
+    url: https://git.FreeBSD.org/ports.git
+    branch: main
 ```
 
-**Ưu tiên ghi đè (từ cao → thấp):**
+#### Ý nghĩa giá trị `null`
 
-1. Dòng lệnh: `make -O "https://custom.server/otsa"`
-2. `build.conf.local`: `GITBASE=https://custom.server/otsa`
-3. `repositories.yaml`: `git_base` và `repositories`
-4. Makefile mặc định: `https://github.com/opnsense`
+| Trường | `null` nghĩa là |
+|--------|----------------|
+| `url: null` | Tự ghép `${git_base}/<repo_name>` |
+| `branch: null` | Dùng default Makefile (xem bảng dưới) |
 
-> **Ghi chú:** File `repositories.yaml` không được commit vào git (đã thêm vào `.gitignore`) để tránh rò rỉ private URL.
+#### Branch mặc định cho mỗi repo
+
+| Repo | Branch mặc định |
+|------|-----------------|
+| `core` | `stable/${ABI}` (vd: `stable/26.1`) |
+| `plugins` | `stable/${ABI}` |
+| `ports` | `master` |
+| `src` | `stable/${ABI}` |
+| `tools` | `master` |
+| `portsref` | `main` |
+
+### Cấu hình Mirrors (mirrors.yaml — file riêng)
+
+Mirror servers dùng cho `prefetch` và `clone` (tách riêng khỏi `repositories.yaml` cho rõ ràng):
+
+```bash
+cp config/26.1/mirrors.yaml.example config/26.1/mirrors.yaml
+```
+
+```yaml
+# config/26.1/mirrors.yaml
+mirrors:
+  - https://mirror.internal.local/otsa
+  - https://mirror.backup.local/otsa
+```
+
+### Ưu tiên ghi đè (URL & Branch & Mirrors)
+
+#### URL
+
+```
+1. Command line:        make -O "https://custom"      ← cao nhất
+2. build.conf.local:    GITBASE=https://custom
+3. repositories.yaml:   git_base hoặc per-repo url
+4. Makefile default:    https://github.com/opnsense   ← thấp nhất
+```
+
+#### Branch
+
+```
+1. Command line:        make COREBRANCH=master         ← cao nhất
+2. build.conf.local:    COREBRANCH=master
+3. repositories.yaml:   per-repo branch
+4. Makefile default:    stable/${ABI} | master | main  ← thấp nhất
+```
+
+#### Mirrors
+
+```
+1. Command line:        make -m "https://custom"       ← cao nhất
+2. mirrors.yaml:        list mirrors
+3. Makefile default:    6 OPNsense mirrors             ← thấp nhất
+```
+
+> ⚠️ **Lưu ý quan trọng**: Cả `repositories.yaml` và `mirrors.yaml` đều **không được commit** vào git (đã trong `.gitignore`) — chỉ file `.example` mới được commit. Lý do: 2 file này có thể chứa URL nội bộ riêng.
+
+> 💡 **Logic override branch**: YAML chỉ override branch khi giá trị hiện tại là default Makefile. Nếu user truyền `make COREBRANCH=...` hoặc set trong `build.conf.local`, command line/build.conf vẫn thắng.
+
+### Ví dụ thực tế
+
+#### Build với fork OT-Project + branch riêng
+
+```yaml
+# config/26.1/repositories.yaml
+git_base: https://github.com/OT-Project
+
+repositories:
+  core:
+    url: null
+    branch: ot-customizations
+  plugins:
+    url: null
+    branch: ot-customizations
+  ports:
+    url: null
+    branch: develop
+  # src, tools, portsref: giữ default
+```
+
+```bash
+make update    # Tự pull đúng URL + branch
+```
+
+#### Build branch experiment (override command line)
+
+```bash
+# Dù YAML có gì, command line vẫn thắng
+make update COREBRANCH=hotfix-123
+```
 
 ---
 
@@ -413,7 +512,7 @@ Toolchain quản lý nhiều repo cùng lúc. Lệnh `update` sẽ clone (nếu 
 ```sh
 make update                          # Cập nhật TẤT CẢ repo (src, ports, core, plugins, tools)
 make update-core,plugins             # Chỉ cập nhật core và plugins
-make update VERSION=25.7             # Checkout tag phiên bản cụ thể
+make update VERSION=26.1             # Checkout tag phiên bản cụ thể
 ```
 
 Các repo có thể quản lý: `core`, `plugins`, `ports`, `portsref`, `src`, `tools`
@@ -428,8 +527,8 @@ Thay vì build từ đầu, bạn có thể tải các bộ (set) đã build s�
 
 ```sh
 make prefetch-base,kernel,packages              # Tải base, kernel, packages từ mirror
-make prefetch-base VERSION=25.7                 # Tải phiên bản cụ thể
-make clone-base,kernel,packages TO=25.7         # Sao chép từ bản build cục bộ có sẵn
+make prefetch-base VERSION=26.1                 # Tải phiên bản cụ thể
+make clone-base,kernel,packages TO=26.1         # Sao chép từ bản build cục bộ có sẵn
 ```
 
 ### Build lại từng gói riêng lẻ
@@ -715,7 +814,6 @@ vm_hook() {
 │   └── pkgver.sh         # Kiểm tra phiên bản package
 │
 ├── config/               # Cấu hình build theo phiên bản ABI
-│   ├── 25.7/             # Cấu hình cho FreeBSD 14.3, phiên bản 25.7
 │   └── 26.1/             # Cấu hình cho FreeBSD 14.3, phiên bản 26.1
 │
 ├── device/               # Cấu hình và hook theo thiết bị

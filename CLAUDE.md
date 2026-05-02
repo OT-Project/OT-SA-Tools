@@ -96,7 +96,7 @@ To override default repository URLs (https://github.com/opnsense/*) and mirror U
 
 1. Copy the example template:
    ```sh
-   cp config/25.7/repositories.yaml.example config/25.7/repositories.yaml
+   cp config/26.1/repositories.yaml.example config/26.1/repositories.yaml
    ```
 
 2. Edit `repositories.yaml` to customize:

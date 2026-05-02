@@ -43,45 +43,69 @@ fi
 
 for ARG in ${ARGS}; do
 	URL=
+	IS_DEFAULT_BRANCH=0
 
 	case ${ARG} in
 	core)
 		BRANCHES="${EXTRABRANCH} ${COREBRANCH}"
 		DIR=${COREDIR}
+		[ "${COREBRANCH}" = "stable/${PRODUCT_ABI}" ] && IS_DEFAULT_BRANCH=1
 		;;
 	plugins)
 		BRANCHES="${EXTRABRANCH} ${PLUGINSBRANCH}"
 		DIR=${PLUGINSDIR}
+		[ "${PLUGINSBRANCH}" = "stable/${PRODUCT_ABI}" ] && IS_DEFAULT_BRANCH=1
 		;;
 	ports)
 		BRANCHES=${PORTSBRANCH}
 		DIR=${PORTSDIR}
+		[ "${PORTSBRANCH}" = "master" ] && IS_DEFAULT_BRANCH=1
 		;;
 	portsref)
 		BRANCHES=${PORTSREFBRANCH}
 		DIR=${PORTSREFDIR}
 		URL=${PORTSREFURL}
+		[ "${PORTSREFBRANCH}" = "main" ] && IS_DEFAULT_BRANCH=1
 		;;
 	src)
 		BRANCHES=${SRCBRANCH}
 		DIR=${SRCDIR}
+		[ "${SRCBRANCH}" = "stable/${PRODUCT_ABI}" ] && IS_DEFAULT_BRANCH=1
 		;;
 	tools)
 		BRANCHES=${TOOLSBRANCH}
 		DIR=${TOOLSDIR}
+		[ "${TOOLSBRANCH}" = "master" ] && IS_DEFAULT_BRANCH=1
 		;;
 	*)
 		continue
 		;;
 	esac
 
-	# Try to get custom URL from repositories.yaml config (REPO_<name>)
+	REPO_UPPER=$(echo "${ARG}" | tr 'a-z' 'A-Z')
+
+	# Override URL từ repositories.yaml (YAML_REPO_<NAME>_URL)
+	# Chỉ override nếu URL chưa có giá trị
 	if [ -z "${URL}" ]; then
-		repo_name=$(echo "${ARG}" | tr 'a-z' 'A-Z')
-		eval "CUSTOM_URL=\${REPO_${repo_name}}"
-		if [ -n "${CUSTOM_URL}" ]; then
-			URL="${CUSTOM_URL}"
+		eval "YAML_URL=\${YAML_REPO_${REPO_UPPER}_URL}"
+		if [ -n "${YAML_URL}" ]; then
+			URL="${YAML_URL}"
 		fi
+	fi
+
+	# Override Branch từ repositories.yaml (YAML_REPO_<NAME>_BRANCH)
+	# CHỈ khi branch hiện tại = default Makefile
+	# (tức user chưa truyền command line / build.conf.local)
+	eval "YAML_BRANCH=\${YAML_REPO_${REPO_UPPER}_BRANCH}"
+	if [ -n "${YAML_BRANCH}" ] && [ "${IS_DEFAULT_BRANCH}" = "1" ]; then
+		case ${ARG} in
+		core|plugins)
+			BRANCHES="${EXTRABRANCH} ${YAML_BRANCH}"
+			;;
+		*)
+			BRANCHES="${YAML_BRANCH}"
+			;;
+		esac
 	fi
 
 	git_clone ${DIR} "${URL}"

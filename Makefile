@@ -64,6 +64,7 @@ ROOTDIR?=	/usr
 TOOLSDIR?=	${ROOTDIR}/tools
 TOOLSBRANCH?=	master
 REPOSCONFIG?=	repositories
+MIRRORSCONFIG?=	mirrors
 
 _OS!=	uname -r
 _OS:=	${_OS:C/-.*//}
@@ -197,7 +198,8 @@ ${STEP}: lint-steps
 	    -H "${COREENV}" -u "${UEFI:tl}" -U "${SUFFIX}" \
 	    -V "${ADDITIONS}" -O "${GITBASE}"  -r "${SERVER}" \
 	    -h "${PLUGINSENV}" -I "${REMOTEDIR}" -D "${EXTRABRANCH}" \
-	    -A "${PORTSREFURL}" -J "${PORTSENV}" -X "${_CONFIGDIR}/${REPOSCONFIG}" \
+	    -A "${PORTSREFURL}" -J "${PORTSENV}" \
+	    -X "${_CONFIGDIR}/${REPOSCONFIG}" -Y "${_CONFIGDIR}/${MIRRORSCONFIG}" \
 	    ${${STEP}_ARGS}
 .endfor
 
