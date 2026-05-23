@@ -28,7 +28,7 @@
 
 set -e
 
-OPTS="A:a:B:b:C:c:D:d:E:e:F:G:g:H:h:I:J:K:k:L:l:m:n:O:o:P:p:R:r:S:s:T:t:U:u:v:V:"
+OPTS="A:a:B:b:C:c:D:d:E:e:F:G:g:H:h:I:J:K:k:L:l:m:n:O:o:P:p:R:r:S:s:T:t:U:u:v:V:X:Y:"
 
 while getopts ${OPTS} OPT; do
 	case ${OPT} in
@@ -166,6 +166,12 @@ while getopts ${OPTS} OPT; do
 	V)
 		export PRODUCT_ADDITIONS=${OPTARG}
 		;;
+	X)
+		export REPOSCONFIG_PATH=${OPTARG}
+		;;
+	Y)
+		export MIRRORSCONFIG_PATH=${OPTARG}
+		;;
 	*)
 		echo "${0}: Unknown argument '${OPT}'" >&2
 		exit 1
@@ -300,6 +306,156 @@ for WANT in ${PRODUCT_WANTS}; do
 		exit 1
 	fi
 done
+
+# Parse YAML repositories configuration (nested format: url + branch per repo)
+# Output:
+#   YAML_GIT_BASE                       (top-level git_base)
+#   YAML_REPO_<NAME>_URL                (per-repo url override)
+#   YAML_REPO_<NAME>_BRANCH             (per-repo branch override)
+parse_yaml_repositories()
+{
+	local yaml_file="${1}"
+	local section=""
+	local current_repo=""
+
+	[ ! -f "${yaml_file}" ] && return 0
+
+	while IFS= read -r line; do
+		# Skip comment and blank lines
+		case "${line}" in
+		'#'*|'')
+			continue
+			;;
+		esac
+
+		# Parse top-level keys (no indent)
+		case "${line}" in
+		git_base:*)
+			YAML_GIT_BASE=$(echo "${line}" | sed 's/^git_base:[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//')
+			section=""
+			continue
+			;;
+		repositories:*)
+			section="repositories"
+			current_repo=""
+			continue
+			;;
+		esac
+
+		# Parse repositories section (nested)
+		if [ "${section}" = "repositories" ]; then
+			# Detect repo name (2-space indent: "  core:")
+			case "${line}" in
+			'  '[a-z_]*:)
+				current_repo=$(echo "${line}" | sed 's/^  //;s/:[[:space:]]*$//')
+				continue
+				;;
+			esac
+
+			# Parse url/branch (4-space indent)
+			case "${line}" in
+			'    url:'*|'    branch:'*)
+				if [ -n "${current_repo}" ]; then
+					local key=$(echo "${line}" | sed 's/^    //;s/:.*//')
+					local value=$(echo "${line}" | sed 's/^    [a-z]*:[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//;s/[[:space:]]*#.*//')
+					# Strip trailing comments and whitespace
+					value=$(echo "${value}" | sed 's/[[:space:]]*$//')
+
+					if [ "${value}" != "null" ] && [ -n "${value}" ]; then
+						local key_upper=$(echo "${key}" | tr 'a-z' 'A-Z')
+						local repo_upper=$(echo "${current_repo}" | tr 'a-z' 'A-Z')
+						eval "export YAML_REPO_${repo_upper}_${key_upper}='${value}'"
+					fi
+				fi
+				;;
+			esac
+		fi
+	done < "${yaml_file}"
+}
+
+# Parse YAML mirrors configuration (separate file: mirrors.yaml)
+# Output:
+#   YAML_MIRRORS  (space-separated list)
+parse_yaml_mirrors()
+{
+	local yaml_file="${1}"
+	local section=""
+
+	[ ! -f "${yaml_file}" ] && return 0
+
+	YAML_MIRRORS=""
+	while IFS= read -r line; do
+		# Skip comment and blank lines
+		case "${line}" in
+		'#'*|'')
+			continue
+			;;
+		esac
+
+		# Top-level: mirrors:
+		case "${line}" in
+		mirrors:*)
+			section="mirrors"
+			continue
+			;;
+		esac
+
+		# Parse mirrors list items
+		if [ "${section}" = "mirrors" ]; then
+			case "${line}" in
+			'  - '*|'- '*)
+				local mirror_url=$(echo "${line}" | sed 's/^[[:space:]]*-[[:space:]]*//;s/[[:space:]]*$//;s/^['"'"'"'"'"']*//;s/['"'"'"'"'"']*$//')
+				if [ -n "${mirror_url}" ]; then
+					YAML_MIRRORS="${YAML_MIRRORS} ${mirror_url}"
+				fi
+				;;
+			esac
+		fi
+	done < "${yaml_file}"
+
+	# Trim leading whitespace
+	if [ -n "${YAML_MIRRORS}" ]; then
+		YAML_MIRRORS=$(echo "${YAML_MIRRORS}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+	fi
+	export YAML_MIRRORS
+}
+
+# Load repositories.yaml + mirrors.yaml
+# Logic ưu tiên: command line > YAML > Makefile default
+# Vì command line luôn truyền giá trị, ta CHỈ override khi giá trị hiện tại
+# bằng default mặc định Makefile (https://github.com/opnsense)
+load_repositories_config()
+{
+	local repos_path="${1}"
+	local mirrors_path="${2}"
+
+	# Parse repositories.yaml
+	if [ -n "${repos_path}" ] && [ -f "${repos_path}.yaml" ]; then
+		parse_yaml_repositories "${repos_path}.yaml"
+
+		# Override GITBASE từ YAML chỉ khi giá trị hiện tại là default
+		if [ -n "${YAML_GIT_BASE}" ] && \
+		   [ "${PRODUCT_GITBASE}" = "https://github.com/opnsense" ]; then
+			export PRODUCT_GITBASE="${YAML_GIT_BASE}"
+		fi
+	fi
+
+	# Parse mirrors.yaml (file riêng)
+	if [ -n "${mirrors_path}" ] && [ -f "${mirrors_path}.yaml" ]; then
+		parse_yaml_mirrors "${mirrors_path}.yaml"
+
+		# Set PRODUCT_MIRROR (chỉ mirror đầu tiên - phù hợp Makefile pattern)
+		if [ -n "${YAML_MIRRORS}" ]; then
+			export PRODUCT_MIRROR=$(echo "${YAML_MIRRORS}" | awk '{print $1}')
+		fi
+	fi
+}
+
+# Load repositories.yaml + mirrors.yaml configuration
+# (Phải gọi sau khi function được định nghĩa)
+if [ -n "${REPOSCONFIG_PATH}" ] || [ -n "${MIRRORSCONFIG_PATH}" ]; then
+	load_repositories_config "${REPOSCONFIG_PATH}" "${MIRRORSCONFIG_PATH}"
+fi
 
 git_reset()
 {

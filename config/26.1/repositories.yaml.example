@@ -1,0 +1,112 @@
+# ==============================================================================
+# OT-SA-Tools Repository Configuration (ABI 26.1)
+# ==============================================================================
+#
+# >>> ĐÂY LÀ FILE TEMPLATE - COPY THÀNH `repositories.yaml` ĐỂ DÙNG <<<
+#
+# Cách dùng:
+#   cp repositories.yaml.example repositories.yaml
+#   vim repositories.yaml
+#
+# File `repositories.yaml` KHÔNG được commit vào git (đã thêm vào .gitignore).
+#
+# ------------------------------------------------------------------------------
+# Cấu trúc YAML
+# ------------------------------------------------------------------------------
+#
+# git_base: <URL>
+#     Base URL chung cho tất cả repos. Khi `url: null`, build system sẽ ghép:
+#     ${git_base}/<repo_name>
+#
+# repositories.<repo>.url:
+#     null      = dùng git_base/<repo>
+#     <URL>     = override URL hoàn toàn (KHÔNG dùng git_base)
+#
+# repositories.<repo>.branch:
+#     null      = dùng default trong Makefile (stable/${ABI}, master, main)
+#     <branch>  = override branch
+#
+# ------------------------------------------------------------------------------
+# Ưu tiên ghi đè (cao → thấp)
+# ------------------------------------------------------------------------------
+#   1. Command line:       make COREBRANCH=master ...
+#   2. build.conf.local:   GITBASE=..., COREBRANCH=...
+#   3. File này:           git_base, repositories.*
+#   4. Makefile default
+# ==============================================================================
+
+
+# Base URL cho tất cả OT-SA repositories
+# Mặc định: https://github.com/opnsense
+git_base: https://github.com/opnsense
+
+
+# Cấu hình URL + Branch cho từng repository
+repositories:
+
+  # OT-SA Core
+  core:
+    url: null               # null = git_base/core
+    branch: null            # null = stable/${ABI} (vd: stable/26.1)
+
+  # OT-SA Plugins
+  plugins:
+    url: null
+    branch: null
+
+  # OT-SA Ports
+  ports:
+    url: null
+    branch: null            # null = master
+
+  # FreeBSD Source
+  src:
+    url: null
+    branch: null            # null = stable/${ABI}
+
+  # Build Tools (chính là repo này)
+  tools:
+    url: null
+    branch: null            # null = master
+
+  # FreeBSD Ports Reference (LUÔN dùng FreeBSD upstream)
+  portsref:
+    url: https://git.FreeBSD.org/ports.git
+    branch: main
+
+
+# ==============================================================================
+# VÍ DỤ TUỲ CHỈNH
+# ==============================================================================
+#
+# Ví dụ 1: Đổi sang fork OT-Project hoàn toàn
+# ------------------------------------------------------------------------------
+# git_base: https://github.com/OT-Project
+#
+# repositories:
+#   core:
+#     url: null
+#     branch: stable/26.1
+#   plugins:
+#     url: null
+#     branch: stable/26.1
+#   # ...
+#
+#
+# Ví dụ 2: Mix fork riêng và upstream
+# ------------------------------------------------------------------------------
+# git_base: https://github.com/opnsense        # Mặc định dùng OPNsense
+#
+# repositories:
+#   core:
+#     url: https://github.com/OT-Project/OT-SA-Core    # Fork riêng
+#     branch: dev
+#
+#
+# Ví dụ 3: Build branch experimental
+# ------------------------------------------------------------------------------
+# repositories:
+#   core:
+#     url: null
+#     branch: feature/new-firewall    # Branch thử nghiệm
+# ==============================================================================

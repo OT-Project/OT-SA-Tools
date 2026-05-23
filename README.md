@@ -1,530 +1,836 @@
-About the OPNsense tools
-========================
+# OT-SA Tools
+
+Bộ công cụ build (toolchain) cho **OT-SA** (OT Security Appliance) — thiết bị bảo mật mạng công nghiệp (OT/ICS). Dự án được fork từ [OPNsense/tools](https://github.com/opnsense/tools) và tùy biến cho mục đích xây dựng appliance bảo mật chuyên dụng.
+
+Toolchain này tạo ra các **image khởi động** (bootable image) ở nhiều định dạng: ISO (DVD), memstick (USB), ổ đĩa máy ảo (VM), flash card (nano), và image cho thiết bị ARM. Quá trình build được điều phối từ mã nguồn FreeBSD, ports (gói phần mềm bên thứ ba), core (lõi OT-SA) và plugins (phần mở rộng).
+
+## Mục lục
+
+- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
+- [Bắt đầu nhanh](#bắt-đầu-nhanh)
+- [Kiến trúc build](#kiến-trúc-build)
+- [Các lệnh build theo giai đoạn](#các-lệnh-build-theo-giai-đoạn)
+- [Tạo image](#tạo-image)
+- [Định dạng image máy ảo (VM)](#định-dạng-image-máy-ảo-vm)
+- [Tuỳ chọn build](#tuỳ-chọn-build)
+- [Cấu trúc thư mục cấu hình](#cấu-trúc-thư-mục-cấu-hình)
+- [Quản lý repository](#quản-lý-repository)
+- [Quản lý gói phần mềm](#quản-lý-gói-phần-mềm)
+- [Ký số và xác minh](#ký-số-và-xác-minh)
+- [Dọn dẹp (cleanup)](#dọn-dẹp-cleanup)
+- [Build chéo cho ARM](#build-chéo-cho-arm)
+- [Lệnh tự động hoá (composite)](#lệnh-tự-động-hoá-composite)
+- [Thao tác từ xa](#thao-tác-từ-xa)
+- [Lệnh tiện ích](#lệnh-tiện-ích)
+- [Hệ thống hook thiết bị](#hệ-thống-hook-thiết-bị)
+- [Cấu trúc dự án](#cấu-trúc-dự-án)
+- [Giấy phép](#giấy-phép)
 
-In conjunction with src.git, ports.git, core.git and plugins.git they
-create sets, packages and images for the OPNsense project.
+---
 
-Setting up a build system
-=========================
+## Yêu cầu hệ thống
 
-Install [FreeBSD](https://www.freebsd.org/) 14.3-RELEASE for amd64
-on a machine with at least 40GB of hard disk and at least 8GB of RAM
-to successfully build all standard images.  All tasks require a root
-user.  Do the following to grab the repositories (overwriting standard
-ports and src):
+| Yêu cầu | Chi tiết |
+|----------|----------|
+| Hệ điều hành | FreeBSD **14.3-RELEASE** (kiến trúc amd64) |
+| Dung lượng ổ đĩa | Tối thiểu **40 GB** trống |
+| RAM | Tối thiểu **8 GB** |
+| Quyền truy cập | **Root** (toàn bộ quá trình build cần quyền root) |
+| Phần mềm cần cài | `git` và `pkg` |
 
-    # pkg install git
-    # cd /usr
-    # git clone https://github.com/opnsense/tools
-    # cd tools
-    # make update
+> **Lưu ý:** Toolchain này chỉ chạy trên FreeBSD. Không hỗ trợ build trên Linux hoặc macOS.
 
-Note that the OPNsense repositories can also be setup in a non-/usr directory
-by setting ROOTDIR.  For example:
+---
 
-    # mkdir -p /tmp/opnsense
-    # cd /tmp/opnsense
-    # git clone https://github.com/opnsense/tools
-    # cd tools
-    # env ROOTDIR=/tmp/opnsense make update
+## Bắt đầu nhanh
+
+### Cài đặt cơ bản
 
-TL;DR
-=====
+```sh
+pkg install git
+cd /usr
+git clone git@github.com:OT-Project/OT-SA-Tools.git tools
+cd tools
+make update    # Tải/cập nhật toàn bộ repo: src, ports, core, plugins
+make dvd       # Build image DVD ISO hoàn chỉnh
+```
 
-    # make dvd
+Image đầu ra nằm trong thư mục được in bởi lệnh:
 
-If successful, a dvd image can be found under:
+```sh
+make print-IMAGESDIR
+```
 
-    # make print-IMAGESDIR
+### Sử dụng thư mục gốc khác (không phải `/usr`)
 
-Detailed build steps and options
-================================
+Mặc định, toolchain đặt tất cả repo con trong `/usr/`. Nếu muốn dùng thư mục khác, thiết lập biến `ROOTDIR`:
 
-How to specify build options on the command line
-------------------------------------------------
+```sh
+mkdir -p /tmp/otsa && cd /tmp/otsa
+git clone git@github.com:OT-Project/OT-SA-Tools.git tools
+cd tools
+env ROOTDIR=/tmp/otsa make update
+```
 
-The build is broken down into individual stages: base,
-kernel, ports, plugins and core can be built separately and
-repeatedly without affecting the other stages.  All stages
-can be reinvoked and continue building without cleaning the
-previous progress.  A final stage assembles all five stages
-into a target image.
+Khi đó cấu trúc sẽ là:
 
-All build steps are invoked via make(1):
+```
+/tmp/otsa/
+├── tools/     # repo này (OT-SA-Tools)
+├── src/       # mã nguồn FreeBSD
+├── ports/     # ports bên thứ ba
+├── core/      # gói lõi OT-SA
+└── plugins/   # plugins mở rộng
+```
 
-    # make step OPTION="value"
+---
 
-Available early build options are:
+## Kiến trúc build
 
-* SETTINGS:	the name of the requested local configuration
-* CONFIGDIR:	read configuration from other directory and override SETTINGS
-		(make sure to use an absolute path when specifying)
+Hệ thống build được chia thành **các giai đoạn độc lập** (stage). Mỗi giai đoạn có thể chạy riêng lẻ và chạy lại nhiều lần — hệ thống sẽ tự tiếp tục từ điểm dừng trước đó, không cần build lại từ đầu.
 
-Available build options are:
+### Sơ đồ phụ thuộc
 
-* ABI:		a custom ABI (defaults to SETTINGS)
-* ADDITIONS:	a list of packages/plugins to add to images
-* ARCH:		the target architecture if not native
-* COMSPEED:	serial speed, e.g. "115200" (default)
-* DEBUG:	build a debug kernel with additional object information
-* DEVICE:	loads device-specific modifications, e.g. "A10" (default)
-* KERNEL:	the kernel config to use, e.g. SMP (default)
-* MIRRORS:	a list of mirrors to prefetch sets from
-* NAME:		"OPNsense" (default)
-* PRIVKEY:	the private key for signing sets
-* PUBKEY:	the public key for signing sets
-* SUFFIX:	the suffix of top package name (default is empty)
-* TYPE:		the base name of the top package to be installed
-* UEFI:		use amd64 hybrid images for said images, e.g. "vga vm"
-* VERSION:	a version tag (if applicable)
-* ZFS:		ZFS pool name to create for VM images, e.g. "zpool"
+```
+base ──→ kernel
+  │
+  ├────→ ports ──→ plugins ──→ core ──→ packages / test
+  │      (gói bên       (phần mở    (lõi     (đóng gói /
+  │       thứ ba)        rộng)       OT-SA)   kiểm thử)
+  │
+  └────→ distfiles
+           (tệp nguồn tải sẵn)
 
-How to specify build options via configuration file
----------------------------------------------------
+kernel + core ──→ dvd / nano / serial / vga / vm / arm
+                  (tạo các loại image khởi động)
+```
 
-The configuration file is required at "CONFIGDIR/build.conf".
-Its contents can be modified to adapt a non-standard build environment
-and to avoid excessive Makefile arguments.
+**Giải thích sơ đồ:**
 
-A local override exists as "CONFIGDIR/build.conf.local" and is
-parsed first to allow more flexible overrides.  Use with care.
+1. **`base`** phải build trước tiên — đây là nền tảng userland (các chương trình cơ bản, thư viện, bootloader) của FreeBSD.
+2. **`kernel`**, **`ports`**, và **`distfiles`** đều phụ thuộc vào `base`.
+3. **`plugins`** phụ thuộc `ports` (vì plugin có thể dùng thư viện từ ports).
+4. **`core`** phụ thuộc `plugins` (core đóng gói toàn bộ sản phẩm).
+5. Các image (`dvd`, `nano`, `serial`, `vga`, `vm`, `arm`) cần cả `kernel` và `core` đã sẵn sàng.
 
-How to run individual or composite build steps
-----------------------------------------------
+> **Quan trọng:** Nếu chạy lại `make ports`, hệ thống sẽ **xoá kết quả** của `plugins` và `core` (vì chúng phụ thuộc ports). Sau đó bạn cần build lại plugins và core.
 
-Kernel, base, packages and release sets are stored under:
+Tất cả các giai đoạn được gọi qua `make`:
 
-    # make print-SETSDIR
+```sh
+make <giai_đoạn> [TUỲ_CHỌN="giá_trị"]
+```
 
-All final images are stored under:
+---
 
-    # make print-IMAGESDIR
+## Các lệnh build theo giai đoạn
 
-Build the userland binaries, bootloader and administrative files:
+### Giai đoạn biên dịch
 
-    # make base
+| Lệnh | Chức năng |
+|-------|-----------|
+| `make base` | Biên dịch userland: các chương trình hệ thống, thư viện, bootloader, và các tệp quản trị |
+| `make kernel` | Biên dịch kernel FreeBSD và các module kernel có thể nạp |
+| `make ports` | Biên dịch toàn bộ gói phần mềm bên thứ ba (275+ port) từ cây ports |
+| `make plugins` | Biên dịch các plugin mở rộng của OT-SA (107 plugin) |
+| `make core` | Đóng gói phần lõi (core) của OT-SA thành package |
 
-Build the kernel and loadable kernel modules:
+### Kiểm tra và xác minh
 
-    # make kernel
+| Lệnh | Chức năng |
+|-------|-----------|
+| `make packages` | Xác minh tính toàn vẹn và đóng gói tất cả các package |
+| `make test` | Chạy bộ kiểm thử hồi quy (regression test) trên các thay đổi core |
+| `make audit` | Kiểm tra các package đã build có lỗ hổng bảo mật đã biết hay không (tra cứu vulnerability database) |
+| `make lint` | Kiểm tra cú pháp POSIX `sh` cho toàn bộ script build và composite |
 
-Build all the third-party ports:
+> **Ghi chú:** Lệnh `lint` được Makefile thiết lập là **điều kiện tiên quyết** cho mọi target build. Nghĩa là mỗi lần chạy build, tất cả script đều được kiểm tra cú pháp trước khi thực thi.
 
-    # make ports
+---
 
-Build additional plugins if needed:
+## Tạo image
 
-    # make plugins
+Sau khi build xong các giai đoạn biên dịch, bạn có thể tạo image khởi động ở nhiều định dạng:
 
-Wrap up our core as a package:
+| Lệnh | Đầu ra | Mô tả |
+|-------|--------|-------|
+| `make dvd` | Tệp `.iso` | Image ISO live — ghi ra đĩa DVD hoặc mount để cài đặt. Hỗ trợ UEFI và Legacy BIOS (amd64) |
+| `make serial` | Tệp `.img` | Image USB memstick với giao tiếp qua **serial console** (dùng cho thiết bị không có màn hình) |
+| `make vga` | Tệp `.img` | Image USB memstick với giao tiếp qua **VGA console** (màn hình + bàn phím thông thường) |
+| `make nano` | Tệp `.img` | Image full-disk cho **thẻ nhớ flash / SSD** — phù hợp thiết bị nhúng, mặc định 3 GB |
+| `make vm` | Tệp `.vmdk` | Image ổ đĩa **máy ảo** — mặc định định dạng VMDK (VMware), 20 GB disk, 1 GB swap |
+| `make arm` | Tệp `.img` | Image cho **thiết bị ARM** (Raspberry Pi, NanoPi R4S, v.v.) |
+| `make release` | Nhiều tệp | Tạo đồng thời tất cả image phát hành: dvd, nano, serial, vga |
+| `make distribution` | Nhiều tệp | Giống `release` nhưng thêm kiểm tra phiên bản và tính nhất quán |
 
-    # make core
+---
 
-A dvd live image is created using:
+## Định dạng image máy ảo (VM)
 
-    # make dvd
+### Cú pháp
 
-A serial memstick live image is created using:
+```sh
+make vm-<định_dạng>[,<dung_lượng>[,<swap>[,<extras>]]]
+```
 
-    # make serial
+### Các định dạng được hỗ trợ
 
-A vga memstick live image is created using:
+| Định dạng | Tương thích với | Ghi chú |
+|-----------|-----------------|---------|
+| `qcow` | QEMU, KVM | Phiên bản cũ (legacy) |
+| `qcow2` | QEMU, KVM | Phiên bản hiện tại, hỗ trợ snapshot |
+| `raw` | Mọi hypervisor | Image sector thô, không nén |
+| `vhd` | VirtualPC, Hyper-V, Xen | Dynamic (dung lượng tăng dần) |
+| `vhdf` | Azure, Hyper-V, Xen | Fixed (dung lượng cố định — bắt buộc cho Azure) |
+| `vmdk` | VMware, VirtualBox | Dynamic, định dạng mặc định |
 
-    # make vga
+### Giá trị mặc định
 
-A flash card full disk image is created using:
+- Định dạng: `vmdk`
+- Dung lượng disk: `20G`
+- Swap: `1G` (đặt `off` để tắt swap)
 
-    # make nano
+### Ví dụ
 
-A virtual machine full disk image is created using:
+```sh
+make vm                           # VMDK 20G, swap 1G (mặc định)
+make vm-qcow2                     # QCOW2 20G, swap 1G
+make vm-raw,40G                   # RAW 40G, swap 1G
+make vm-vhdf,30G,2G               # VHD fixed 30G, swap 2G (cho Azure)
+make vm-vmdk,20G,off              # VMDK 20G, không có swap
+```
 
-    # make vm
+### Tuỳ chỉnh kích thước image nano
 
-A special embedded device image based on vm variety:
+```sh
+make nano-<kích_thước>
+```
 
-    # make factory
+Ví dụ: `make nano-4G` tạo image nano 4 GB thay vì mặc định 3 GB.
 
-Release sets can be built as follows although the result is
-an unpredictable set of images depending on the previous
-build states:
+---
 
-    # make release
+## Tuỳ chọn build
 
-However, the release target is necessary for the following
-target which includes sanity checks, proper clearing of the
-images directory and core package version alignment:
+Các tuỳ chọn được truyền qua dòng lệnh hoặc thiết lập trong `config/<ABI>/build.conf`:
 
-    # make distribution
+| Tuỳ chọn | Mặc định | Mô tả |
+|----------|----------|-------|
+| `SETTINGS` | (tự động) | Tên profile cấu hình — chọn thư mục `config/<tên>/` tương ứng |
+| `CONFIGDIR` | (tự động) | Đường dẫn tuyệt đối tới thư mục cấu hình (ghi đè `SETTINGS`) |
+| `ABI` | từ SETTINGS | Chuỗi phiên bản ABI (ví dụ: `26.1`) |
+| `ADDITIONS` | (trống) | Danh sách gói/plugin bổ sung thêm vào image |
+| `ARCH` | native | Kiến trúc đích: `amd64` hoặc `aarch64` |
+| `COMSPEED` | `115200` | Tốc độ baud của serial console |
+| `DEBUG` | (trống) | Bật build kernel debug với symbol bổ sung |
+| `DEVICE` | `A10` | Profile thiết bị từ thư mục `device/` |
+| `KERNEL` | `SMP` | Tên cấu hình kernel (tệp trong `config/<ABI>/`) |
+| `MIRRORS` | (upstream) | URL mirror để tải trước (prefetch) các bộ cài sẵn |
+| `NAME` | `OPNsense` | Tên sản phẩm hiển thị trong image |
+| `PRIVKEY` | (trống) | Đường dẫn tới private key cho ký số package |
+| `PUBKEY` | (trống) | Đường dẫn tới public key cho xác minh chữ ký |
+| `SUFFIX` | (trống) | Hậu tố tên gói chính (top package) |
+| `TYPE` | `opnsense` | Tên cơ sở của gói chính |
+| `UEFI` | `arm dvd serial vga vm` | Danh sách loại image sử dụng UEFI hybrid boot |
+| `VERSION` | (timestamp) | Nhãn phiên bản cho bản build |
+| `ZFS` | (trống) | Tên ZFS pool cho image VM (để trống = dùng UFS) |
 
-Cross-building for other architecures
--------------------------------------
+### Ví dụ sử dụng
 
-This feature is currently experimental and requires installation
-of packages for cross building / user mode emulation and additional
-boot files to be installed as prompted by the build system.
+```sh
+# Build với tên sản phẩm tuỳ chỉnh
+make dvd NAME="OT-SA" TYPE="otsa"
 
-A cross-build on the operating system sources is executed by
-specifying the target architecture and custom kernel:
+# Build kernel debug
+make kernel DEBUG=debug
 
-    # make base kernel DEVICE=BANANAPI
+# Build image VM cho Azure với ZFS
+make vm-vhdf,30G ZFS=zroot
 
-In order to speed up building of using an emulated packages build,
-the xtools set can be created like so:
+# Thêm plugin bổ sung vào image
+make dvd ADDITIONS="security/acme-client net/tailscale"
+```
 
-    # make xtools DEVICE=BANANAPI
+---
 
-The xtools set is then used during the packages build similar to
-the distfiles set.
+## Cấu trúc thư mục cấu hình
 
-    # make packages DEVICE=BANANAPI
+Mỗi phiên bản ABI có một thư mục cấu hình riêng:
 
-The final image is built using:
+```
+config/<ABI>/
+├── build.conf          # Cấu hình build chính: phiên bản OS, ngôn ngữ (PHP, Python, ...), SSL
+├── build.conf.local    # Ghi đè cục bộ — được đọc TRƯỚC build.conf, KHÔNG commit vào git
+├── ports.conf          # Danh sách ports cần build (275+ gói)
+├── plugins.conf        # Danh sách plugins cần build (107 plugin)
+├── make.conf           # Cấu hình make.conf của FreeBSD cho quá trình build ports
+├── extras.conf         # Hàm hook tuỳ chỉnh cho từng loại image
+├── SMP                 # Cấu hình kernel SMP (cho amd64)
+├── SMP-ARM             # Cấu hình kernel SMP (cho ARM)
+├── src.conf            # Cấu hình src.conf của FreeBSD (bật/tắt tính năng hệ thống)
+├── base.plist.*        # Danh sách tệp trong base package (25.000+ dòng)
+└── base.obsolete.*     # Danh sách tệp lỗi thời cần xoá khi nâng cấp
+```
 
-    # make arm-<size> DEVICE=BANANAPI
+Hiện tại dùng bộ cấu hình **26.1** (FreeBSD 14.3).
 
-Currently available device are: BANANAPI and RPI2.
+### Ghi đè cấu hình cục bộ (build.conf.local)
 
-About other scripts and tweaks
-==============================
+Tệp `build.conf.local` cho phép ghi đè bất kỳ biến nào trong `build.conf` mà không ảnh hưởng tới repo git.
 
-Device-specific settings
-------------------------
+#### So sánh nhanh `build.conf` vs `build.conf.local`
 
-Device-specific settings can be found and added in the
-device/ directory.  Of special interest are hooks into
-the build process for required non-default settings for
-image builds.  The .conf files are shell scripts that can
-define hooks in the form of e.g.:
+| Đặc điểm | `build.conf` | `build.conf.local` |
+|----------|-------------|---------------------|
+| **Mục đích** | Cấu hình **chung** của dự án | Cấu hình **riêng** của từng dev/máy |
+| **Commit vào git?** | ✅ Có | ❌ Không (đã trong `.gitignore`) |
+| **Bắt buộc tồn tại?** | ✅ Có | ❌ Không (tuỳ chọn) |
+| **Cú pháp** | `?=` (set if undefined) | `=` (force set) |
+| **Thứ tự load** | Sau (priority thấp) | Trước (priority cao) |
 
-    serial_hook()
-    {
-        # ${1} is the target file system root
-        touch ${1}/my_custom_file
-    }
+#### Cú pháp khác nhau (QUAN TRỌNG!)
 
-These hooks are available for all image types, namely
-dvd, nano, serial, vga and vm.  Device-specific hooks
-are loaded after config-specific hooks and both of them
-can coexist in a given build.
+```sh
+# build.conf — luôn dùng ?= để cho phép override
+PHP?=83                         # Set PHP=83 nếu PHP chưa có giá trị
 
-Updating the code repositories
-------------------------------
+# build.conf.local — luôn dùng = để force override
+PHP=84                          # Luôn set PHP=84 (override mọi nơi khác)
+```
 
-Updating all or individual repositories can be done as follows:
+> ⚠️ **Lưu ý:** Nếu dùng `?=` trong `build.conf.local`, override sẽ **không có hiệu lực** vì biến trong `build.conf` cũng dùng `?=` và sẽ được load sau. Luôn dùng `=` trong file `.local`.
 
-    # make update[-<repo1>[,...]] [VERSION=git.tag]
+#### Ví dụ thực tế
 
-Available update options are: core, plugins, ports, portsref, src, tools
+**Tạo cấu hình cá nhân:**
 
-VERSION can be used to update to the matching git tag instead of HEAD.
+```sh
+# config/26.1/build.conf.local
 
-Regression tests and ports audit
---------------------------------
+# Tôi muốn thử nghiệm Python 3.12
+PYTHON=312
 
-Before building images, you can run the regression tests
-to check the integrity of your core.git modifications plus
-generate output for the style checker:
+# Build cho fork riêng của tôi
+GITBASE=https://github.com/my-fork
 
-    # make test
+# Bật verbose để debug build
+VERBOSE=1
 
-To check the binary packages from ports against the upstream
-vulnerability database run the following:
+# Đổi tên sản phẩm
+NAME=MyProduct
+```
 
-    # make audit
+**Kết quả khi build:**
 
-Advanced package builds
------------------------
+| Biến | Giá trị | Nguồn |
+|------|---------|-------|
+| `APACHE` | 24 | build.conf |
+| `PHP` | 83 | build.conf |
+| `PYTHON` | **312** | build.conf.local (override) |
+| `GITBASE` | **https://github.com/my-fork** | build.conf.local (override) |
+| `VERBOSE` | **1** | build.conf.local |
 
-Package sets ready for web server deployment are automatically
-generated and modified by ports, plugins and core steps.  The
-build automatically caches temporary build dependencies to avoid
-spurious rebuilds.  These packages are later discarded to provide
-a slim runtime set only.
+#### Khi nào dùng file nào?
 
-If signing keys are available, the packages set will be signed
-twice, first embedded into repository metadata (inside) and
-then again as a flat file (outside) to ensure integrity.
+| Tình huống | Dùng |
+|-----------|------|
+| Đổi phiên bản PHP/Python cho **cả team** | `build.conf` (commit) |
+| Cá nhân thử nghiệm phiên bản mới | `build.conf.local` |
+| Cấu hình mặc định của dự án | `build.conf` (commit) |
+| Build cho fork riêng | `build.conf.local` |
+| Signing keys / URL nội bộ | `build.conf.local` (bí mật) |
+| Bật DEBUG/VERBOSE | `build.conf.local` |
 
-For faster ports building it may be of use to cache all distribution
-files before running the actual build:
+#### Workflow điển hình
 
-    # make distfiles
+```sh
+# 1. Clone repo
+git clone git@github.com:OT-Project/OT-SA-Tools.git tools
+cd tools
 
-For targeted rebuilding of already built packages the following
-works:
+# 2. Xem các biến có thể tuỳ chỉnh (đã có comment chi tiết)
+cat config/26.1/build.conf
 
-    # make ports-<packagename>[,...]
-    # make plugins-<packagename>[,...]
-    # make core-<packagename>[,...]
+# 3. Tạo cấu hình cá nhân (KHÔNG commit)
+cat > config/26.1/build.conf.local <<EOF
+GITBASE=https://github.com/OT-Project
+VERBOSE=1
+EOF
 
-Please note that reissuing ports builds will clear plugins and
-core progress.  However, following option apply to PORTSENV:
+# 4. Build với cấu hình của bạn
+make update
+make base kernel
+```
 
-* BATCH=no	Developer mode with shell after each build failure
-* DEPEND=no	Do not tamper with plugins or core packages
-* MISMATCH=no	Rebuild packages that have a version mismatch
-* PRUNE=no	Do not check ports integrity prior to rebuild
+#### Tương tự cho plugins
 
-The defaults for these ports options are set to "yes".  A sample
-invoke is as follows:
+Tệp `plugins.conf.local` cho phép tuỳ chỉnh danh sách plugin cục bộ (cùng cơ chế).
 
-    # make ports-curl PORTSENV="DEPEND=no PRUNE=no"
+### Cấu hình Repository URL + Branch (repositories.yaml)
 
-Both ports and plugins builds allow to override the current list
-derived from their respective configuration files, i.e.:
+Để thay đổi URL **và branch** của git repositories qua một file YAML duy nhất:
 
-    # make ports PORTSLIST="security/openssl"
-    # make plugins PLUGINSLIST="devel/debug"
+#### Setup ban đầu
 
-Acquiring precompiled sets from the mirrors or another local directory
----------------------------------------------------------------------
+```bash
+cp config/26.1/repositories.yaml.example config/26.1/repositories.yaml
+vim config/26.1/repositories.yaml
+```
 
-Compiled sets can be prefetched from a mirror if they exist,
-while removing any previously available set:
+#### Cấu trúc file (nested format: URL + branch)
 
-    # make prefetch-<option>[,...] [VERSION=<full_version>]
+```yaml
+# config/26.1/repositories.yaml
 
-If another build configuration is used locally that is compatible,
-the sets can be cloned from there as well:
+# Base URL chung (dùng khi url: null)
+git_base: https://github.com/OT-Project
 
-    # make clone-<option>[,...] TO=<major_version>
+repositories:
+  core:
+    url: null                    # null = git_base/core
+    branch: null                 # null = stable/${ABI}
+  plugins:
+    url: null
+    branch: null
+  ports:
+    url: https://github.com/OT-Project/OT-Ports    # Override URL
+    branch: develop                                 # Override branch
+  src:
+    url: null
+    branch: null
+  tools:
+    url: null
+    branch: null
+  portsref:
+    url: https://git.FreeBSD.org/ports.git
+    branch: main
+```
 
-Available prefetch or clone options are:
+#### Ý nghĩa giá trị `null`
 
-* base:		select matching base set
-* distfiles:	select matching distfiles set (clone only)
-* kernel:	select matching kernel set
-* packages:	select matching packages set
+| Trường | `null` nghĩa là |
+|--------|----------------|
+| `url: null` | Tự ghép `${git_base}/<repo_name>` |
+| `branch: null` | Dùng default Makefile (xem bảng dưới) |
 
-Using signatures to verify integrity
-------------------------------------
+#### Branch mặc định cho mỗi repo
 
-Signing for all sets can be redone or applied to a previous run
-that did not sign by invoking:
+| Repo | Branch mặc định |
+|------|-----------------|
+| `core` | `stable/${ABI}` (vd: `stable/26.1`) |
+| `plugins` | `stable/${ABI}` |
+| `ports` | `master` |
+| `src` | `stable/${ABI}` |
+| `tools` | `master` |
+| `portsref` | `main` |
 
-    # make sign-base,kernel,packages
+### Cấu hình Mirrors (mirrors.yaml — file riêng)
 
-A verification of all available set signatures is done via:
+Mirror servers dùng cho `prefetch` và `clone` (tách riêng khỏi `repositories.yaml` cho rõ ràng):
 
-    # make verify
+```bash
+cp config/26.1/mirrors.yaml.example config/26.1/mirrors.yaml
+```
 
-Nano image size adjustment
---------------------------
+```yaml
+# config/26.1/mirrors.yaml
+mirrors:
+  - https://mirror.internal.local/otsa
+  - https://mirror.backup.local/otsa
+```
 
-Nano images can be adjusted in size using an argument as follows:
+### Ưu tiên ghi đè (URL & Branch & Mirrors)
 
-    # make nano-<size>
+#### URL
 
-Virtual machine images
-----------------------
+```
+1. Command line:        make -O "https://custom"      ← cao nhất
+2. build.conf.local:    GITBASE=https://custom
+3. repositories.yaml:   git_base hoặc per-repo url
+4. Makefile default:    https://github.com/opnsense   ← thấp nhất
+```
 
-Virtual machine images come in varying disk formats and sizes.
-For this reason they are not included in our binary releases.
-The default format is vmdk with 20G and 1G swap.  If you want
-to change that you can manually alter the invoke using:
+#### Branch
 
-    # make vm-<format>[,<size>[,<swap>[,<extras>]]]
+```
+1. Command line:        make COREBRANCH=master         ← cao nhất
+2. build.conf.local:    COREBRANCH=master
+3. repositories.yaml:   per-repo branch
+4. Makefile default:    stable/${ABI} | master | main  ← thấp nhất
+```
 
-Available virtual machine disk formats are:
+#### Mirrors
 
-* qcow:		Qemu, KVM (legacy format)
-* qcow2:	Qemu, KVM (not backwards-compatible)
-* raw:		Unformatted (sector by sector)
-* vhd:		VirtualPC, Hyper-V, Xen (dynamic size)
-* vhdf:		Azure, VirtualPC, Hyper-V, Xen (fixed size)
-* vmdk:		VMWare, VirtualBox (dynamic size)
+```
+1. Command line:        make -m "https://custom"       ← cao nhất
+2. mirrors.yaml:        list mirrors
+3. Makefile default:    6 OPNsense mirrors             ← thấp nhất
+```
 
-The swap argument is either its size or set to "off" to disable.
+> ⚠️ **Lưu ý quan trọng**: Cả `repositories.yaml` và `mirrors.yaml` đều **không được commit** vào git (đã trong `.gitignore`) — chỉ file `.example` mới được commit. Lý do: 2 file này có thể chứa URL nội bộ riêng.
 
-The extras argument can be any extras.conf hook in case the
-default "vm" hook is not desirable.
+> 💡 **Logic override branch**: YAML chỉ override branch khi giá trị hiện tại là default Makefile. Nếu user truyền `make COREBRANCH=...` hoặc set trong `build.conf.local`, command line/build.conf vẫn thắng.
 
-Clearing individual build step progress
----------------------------------------
+### Ví dụ thực tế
 
-A couple of build machine cleanup helpers are available
-via the clean script:
+#### Build với fork OT-Project + branch riêng
 
-    # make clean-<option>[,...]
+```yaml
+# config/26.1/repositories.yaml
+git_base: https://github.com/OT-Project
 
-Available clean options are:
+repositories:
+  core:
+    url: null
+    branch: ot-customizations
+  plugins:
+    url: null
+    branch: ot-customizations
+  ports:
+    url: null
+    branch: develop
+  # src, tools, portsref: giữ default
+```
 
-* arm:		remove arm image
-* base:		remove base set
-* distfiles:	remove distfiles set
-* dvd:		remove dvd image
-* core:		remove core from packages set
-* images:	remove all images
-* kernel:	remove kernel set
-* logs:		remove all logs
-* nano:		remove nano image
-* obj:		remove all object directories
-* packages:	remove packages set
-* plugins:	remove plugins from packages set
-* ports:	alias for "packages" option
-* release:	remove release set
-* serial:	remove serial image
-* sets:		remove all sets
-* src:		reset kernel/base build directory
-* stage:	reset main staging area
-* vga:		remove vga image
-* vm:		remove vm image
-* xtools:	remove xtools set
+```bash
+make update    # Tự pull đúng URL + branch
+```
 
-How the port tree is updated via its upstream repository
---------------------------------------------------------
+#### Build branch experiment (override command line)
 
-The ports tree has a few of our modifications and is sometimes a
-bit ahead of FreeBSD.  In order to keep the local changes, a
-skimming script is used to review and copy upstream changes:
+```bash
+# Dù YAML có gì, command line vẫn thắng
+make update COREBRANCH=hotfix-123
+```
 
-    # make skim[-<option>]
+---
 
-Available options are:
+## Quản lý repository
 
-* used:		review and copy upstream changes
-* unused:	copy unused upstream changes
-* (none):	all of the above
+Toolchain quản lý nhiều repo cùng lúc. Lệnh `update` sẽ clone (nếu chưa có) hoặc pull (nếu đã có) từ remote.
 
-Syncing a ports branch for custom package builds
-------------------------------------------------
+```sh
+make update                          # Cập nhật TẤT CẢ repo (src, ports, core, plugins, tools)
+make update-core,plugins             # Chỉ cập nhật core và plugins
+make update VERSION=26.1             # Checkout tag phiên bản cụ thể
+```
 
-When maintaining branches the master branch holds updates that
-we want to cherry-pick to another branch.  To ease the process
-the sync step can deal with the complexity involved:
+Các repo có thể quản lý: `core`, `plugins`, `ports`, `portsref`, `src`, `tools`
 
-    # make sync-category/port[,category/port[,...]]
+---
 
-Rebasing the file lists for the base sets
------------------------------------------
+## Quản lý gói phần mềm
 
-In case base files changed, the base package list and obsoleted
-files need to be regenerated.  This is done using:
+### Tải trước từ mirror (prefetch)
 
-    # make rebase
+Thay vì build từ đầu, bạn có thể tải các bộ (set) đã build sẵn từ mirror:
 
-Switching to the build jail for inspection
-------------------------------------------
+```sh
+make prefetch-base,kernel,packages              # Tải base, kernel, packages từ mirror
+make prefetch-base VERSION=26.1                 # Tải phiên bản cụ thể
+make clone-base,kernel,packages TO=26.1         # Sao chép từ bản build cục bộ có sẵn
+```
 
-Shall any debugging be needed inside the build jail, the following
-command will use chroot(8) to enter the active build jail:
+### Build lại từng gói riêng lẻ
 
-    # make chroot[-<subdir>]
+Không cần build lại toàn bộ — bạn có thể chỉ định build lại một gói cụ thể bằng cú pháp `<giai_đoạn>-<tên_gói>`:
 
-Boot images in the native bhyve(8) hypervisor
----------------------------------------------
+```sh
+make ports-curl                                 # Build lại port curl
+make plugins-os-some-plugin                     # Build lại một plugin cụ thể
+make core-opnsense                              # Build lại core package
+```
 
-There's also the posh way to boot a final image using bhyve(8):
+### Tuỳ chọn build ports
 
-    # make boot-<image>
+Các tuỳ chọn được truyền qua biến `PORTSENV`:
 
-Please note that login is only possible via the Nano and Serial images.
+| Tuỳ chọn | Mặc định | Tác dụng |
+|----------|----------|----------|
+| `BATCH` | `yes` | `no` = dừng lại và mở shell khi build thất bại (để debug) |
+| `DEPEND` | `yes` | `no` = không chạm vào gói plugin/core (giữ nguyên chúng) |
+| `MISMATCH` | `yes` | `no` = bỏ qua việc build lại các gói có phiên bản không khớp |
+| `PRUNE` | `yes` | `no` = bỏ qua kiểm tra tính toàn vẹn ports |
 
-Booting VM images will not work for types other than "raw".
+```sh
+# Build lại curl mà không ảnh hưởng plugin/core, bỏ qua kiểm tra ports
+make ports-curl PORTSENV="DEPEND=no PRUNE=no"
+```
 
-Generating a make.conf for use in running OPNsense
---------------------------------------------------
+### Ghi đè danh sách gói
 
-A ports tree in a running OPNsense can be used to build packages
-not published on the mirrors.  To generate the make.conf contents
-for standalone use on the host use:
+Mặc định, `make ports` build tất cả gói trong `ports.conf`. Để chỉ build một số gói cụ thể:
 
-    # make make.conf
+```sh
+make ports PORTSLIST="security/openssl"         # Chỉ build openssl
+make plugins PLUGINSLIST="devel/debug"          # Chỉ build plugin debug
+```
 
-Reading and modifying version numbers of build sets and images
---------------------------------------------------------------
+---
 
-Normally the build scripts will pick up version numbers based
-on commit tags or given version tags or a date-type string.
-Should it not fit your needs, you can change the name using:
+## Ký số và xác minh
 
-    # make rename-<set>[,<another_set>] VERSION=<new_name>
+Hệ thống hỗ trợ ký số các bộ build (set) và xác minh chữ ký để đảm bảo tính toàn vẹn:
 
-The available targets are: base, distfiles, dvd, kernel, nano,
-packages, serial, vga and vm.
+```sh
+make sign-base,kernel,packages       # Ký (hoặc ký lại) các set
+make verify                          # Xác minh chữ ký của tất cả set
+make fingerprint                     # Hiển thị fingerprint của khoá ký
+```
 
-The current state of the associated build repositories checked
-out on the system can be printed using:
+Khoá ký được lưu tại `config/<ABI>/repo.key` (private) và `config/<ABI>/repo.pub` (public). Các tệp này **không được commit** vào git (đã có trong `.gitignore`).
 
-    # make info
+---
 
-Repositories that have signing keys can show the current
-fingerprint using:
+## Dọn dẹp (cleanup)
 
-    # make fingerprint
+Xoá kết quả build của các giai đoạn cụ thể:
 
-Last but not least, in case build variables needs to be inspected,
-they can be printed selectively using:
+```sh
+make clean-<mục_tiêu>[,<mục_tiêu>,...]
+```
 
-    # make print-<variable1>[,<variable2>]
+### Các mục tiêu có thể dọn dẹp
 
-Compressing images
-------------------
+| Mục tiêu | Xoá cái gì |
+|-----------|-------------|
+| `base` | Kết quả build userland |
+| `kernel` | Kết quả build kernel |
+| `ports` | Kết quả build ports (cũng xoá plugins và core) |
+| `plugins` | Kết quả build plugins |
+| `core` | Kết quả build core |
+| `packages` | Gói package đã đóng |
+| `distfiles` | Tệp nguồn đã tải |
+| `images` | Tất cả image đã tạo |
+| `dvd`, `nano`, `serial`, `vga`, `vm`, `arm` | Loại image cụ thể |
+| `obj` | Thư mục object (kết quả biên dịch trung gian) |
+| `logs` | Log build |
+| `sets` | Các bộ (set) đã ký |
+| `stage` | Thư mục staging |
+| `src` | Mã nguồn FreeBSD đã clone |
+| `release` | Tất cả image release |
+| `xtools` | Cross-compilation toolchain |
 
-Images are compressed using bzip2(1) for distribution.  This can
-be invoked manually using:
+### Ví dụ
 
-    # make compress-<image1>[,<image2>]
+```sh
+make clean-base,kernel              # Dọn base và kernel để build lại
+make clean-images                   # Xoá tất cả image, giữ lại packages
+make clean-obj                      # Xoá object files để giải phóng dung lượng
+```
 
-Composite build steps
----------------------
+---
 
-A fully contained nightly build for the system is invoked using:
+## Build chéo cho ARM
 
-    # make nightly
+Toolchain hỗ trợ build chéo (cross-compilation) cho các thiết bị ARM từ máy amd64:
 
-When nightly builds are being run you can get a brief report of
-the latest one for each build step or select a build step to either
-view the file or watch it run in real time:
+```sh
+make base kernel DEVICE=RPI                # Build base + kernel cho Raspberry Pi
+make xtools DEVICE=RPI                     # Build toolchain native cho ARM
+make packages DEVICE=RPI                   # Build packages (sử dụng xtools)
+make arm-<kích_thước> DEVICE=RPI           # Tạo image ARM cuối cùng
+```
 
-    # make watch[-<step>]
+### Thiết bị ARM được hỗ trợ
 
-To allow the nightly build to build both release and development packages
-use:
+| Thiết bị | Tệp cấu hình | Mô tả |
+|----------|---------------|-------|
+| **A10** | `device/A10.conf` | Deciso NetBoard A10 — thiết bị mặc định |
+| **ARM64** | `device/ARM64.conf` | ARM64 chung — tương thích QEMU và ESXi trên ARM |
+| **R4S** | `device/R4S.conf` | FriendlyARM NanoPi R4S — router nhỏ gọn, serial 1.5 Mbps |
+| **ROCKPRO64** | `device/ROCKPRO64.conf` | Pine64 RockPro64 — SBC hiệu suất cao |
+| **RPI** | `device/RPI.conf` | Raspberry Pi 3/4/CM4 — SBC phổ biến nhất |
 
-    # make nightly EXTRABRANCH=master
+---
 
-Nightly builds are the only builds that write and archive logs under:
+## Lệnh tự động hoá (composite)
 
-    # make print-LOGSDIR
+Các lệnh composite kết hợp nhiều giai đoạn build thành một quy trình hoàn chỉnh:
 
-with ./latest containing the last nightly build run.  Older logs are
-archived and available for a whole week for retrospective analysis.
+### Build hàng đêm (nightly)
 
-To push sets and images to a remote location use the upload target:
+| Lệnh | Mô tả |
+|-------|-------|
+| `make nightly` | Build tự động hoàn chỉnh — dọn dẹp, cập nhật, build, kiểm thử, ghi log |
+| `make nightly EXTRABRANCH=master` | Nightly build kèm cả gói từ nhánh dev |
 
-    # make upload-<set>[,...]
+Quy trình nightly gồm 2 giai đoạn:
 
-To pull sets and images from a remote location use the download target:
+- **Giai đoạn 1:** Dọn obj → cập nhật repo → lấy thông tin → build base → build kernel → build xtools → tải distfiles → dọn packages
+- **Giai đoạn 2:** Xoá tệp lỗi thời → cấu hình ports → build ports → build plugins → build core → audit bảo mật → kiểm thử
 
-    # make download-<set>[,...]
+### Theo dõi build
 
-Logs can be downloaded as well for local inspection.  Note that download
-like prefetch will purge all locally existing targets.  Use SERVER to
-specify the remote end, e.g. SERVER=user@does.not.exist
+| Lệnh | Mô tả |
+|-------|-------|
+| `make watch` | Hiển thị trạng thái build nightly mới nhất |
+| `make watch-<giai_đoạn>` | Xem log realtime của một giai đoạn build cụ thể |
 
-Additionally, REMOTEDIR can be used to specify a remote location.
+Log nightly được lưu trữ trong 1 tuần. Thư mục `./latest` trỏ tới lần build gần nhất. Xem đường dẫn log:
 
-If you want to script interactive prompts you may use the confirm target
-to operate yes or no questions before an action:
+```sh
+make print-LOGSDIR
+```
 
-    # make info confirm dvd
+### Các quy trình khác
 
-To add arbitrary plugins from an external location into an image you can
-use the following:
+| Lệnh | Mô tả |
+|-------|-------|
+| `make distribution` | Build phát hành chính thức — kiểm tra phiên bản, đảm bảo tính nhất quán |
+| `make hotfix` | Build lại các plugin/core bị thiếu hoặc hỏng, ký lại |
+| `make hotfix-core` | Build lại toàn bộ core |
+| `make hotfix-plugins` | Build lại toàn bộ plugins |
+| `make hotfix-ports` | Build lại các port bị thiếu hoặc sai phiên bản |
+| `make factory` | Tạo image cho thiết bị nhúng (embedded) |
+| `make custom-<image> ADDITIONS="..."` | Tạo image tuỳ chỉnh với plugin bổ sung |
 
-    # make custom-<image> ADDITIONS="an-existing-plugin path/to/extra/plugin"
+### Ví dụ custom image
 
-Last but not least, a rebuild of OPNsense core and plugins on package
-sets is invoked using:
+```sh
+# Tạo image DVD với thêm plugin HAProxy và Zabbix agent
+make custom-dvd ADDITIONS="net/haproxy net-mgmt/zabbix7-agent"
+```
 
-    # make hotfix[-<step>]
+---
 
-The default hotfix run is a non-destructive rebuild pass for missing
-plugins and core packages which also signs the existing packages.
+## Thao tác từ xa
 
-You can also do a full rebuild using "core" or "plugins".  The "ports"
-step, however, will automatically rebuild mismatching and missing ports.
+Đẩy (upload) hoặc kéo (download) các bộ build qua SSH:
 
-Any other argument (or list of arguments separated by comma) will be
-treated as individual packages to be rebuilt by their matching steps.
+```sh
+make upload-<set>[,...]  SERVER=user@host     # Đẩy set/image lên server
+make download-<set>[,...] SERVER=user@host     # Kéo set/image từ server (thay thế bản cục bộ)
+```
+
+- Biến `REMOTEDIR` thiết lập đường dẫn trên server từ xa.
+- Lệnh `download` hoạt động giống `prefetch` — nó **xoá bản cục bộ trước** rồi mới tải về.
+
+---
+
+## Lệnh tiện ích
+
+| Lệnh | Mô tả |
+|-------|-------|
+| `make info` | In trạng thái các repository (nhánh, commit, thay đổi) |
+| `make print-<BIẾN>[,<BIẾN>]` | Kiểm tra giá trị biến build |
+| `make print-SETSDIR` | Đường dẫn tới thư mục set (kernel, base, packages) |
+| `make print-IMAGESDIR` | Đường dẫn tới thư mục chứa image |
+| `make print-LOGSDIR` | Đường dẫn tới thư mục log |
+| `make rename-<set> VERSION=X` | Đổi nhãn phiên bản của một set |
+| `make compress-<image>[,...]` | Nén image bằng bzip2 để phân phối |
+| `make make.conf` | Tạo tệp make.conf để build port độc lập (ngoài toolchain) |
+| `make chroot` | Vào build jail (môi trường build cách ly) |
+| `make chroot-<thư_mục_con>` | Vào thư mục con cụ thể trong chroot |
+| `make boot-<image>` | Khởi động image trong bhyve (chỉ serial/nano) |
+| `make confirm` | Cổng xác nhận yes/no — hữu ích khi viết script tự động |
+| `make skim` | Xem xét và áp dụng thay đổi từ upstream port tree |
+| `make sync-cat/port[,...]` | Cherry-pick thay đổi port giữa các nhánh |
+| `make rebase` | Tạo lại danh sách tệp base sau khi thay đổi src |
+| `make distfiles` | Tải trước tệp nguồn port (cache lại để build nhanh hơn) |
+
+---
+
+## Hệ thống hook thiết bị
+
+Hook là các hàm shell được gọi **tự động** trong quá trình tạo image, cho phép tuỳ chỉnh image cho từng loại thiết bị hoặc định dạng cụ thể.
+
+### Thứ tự thực thi
+
+1. **Hook cấu hình** (`config/<ABI>/extras.conf`) — chạy trước, áp dụng cho mọi thiết bị
+2. **Hook thiết bị** (`device/<TÊN>.conf`) — chạy sau, tuỳ chỉnh riêng cho thiết bị
+
+### Các hook có thể định nghĩa
+
+| Hook | Được gọi khi |
+|------|-------------|
+| `serial_hook()` | Tạo image serial memstick |
+| `dvd_hook()` | Tạo image DVD ISO |
+| `nano_hook()` | Tạo image nano flash |
+| `vga_hook()` | Tạo image VGA memstick |
+| `vm_hook()` | Tạo image VM |
+| `arm_hook()` | Tạo image ARM |
+
+### Cách viết hook
+
+Tham số `${1}` là đường dẫn **gốc hệ thống tệp** (filesystem root) của image đang được tạo. Bạn có thể thêm, sửa, hoặc xoá tệp trong đó:
+
+```sh
+# Ví dụ trong device/CUSTOM.conf
+serial_hook() {
+    # Thêm tệp cấu hình tuỳ chỉnh vào image serial
+    cp /path/to/custom.conf ${1}/etc/custom.conf
+    
+    # Bật service tuỳ chỉnh
+    echo 'custom_service_enable="YES"' >> ${1}/etc/rc.conf.local
+}
+
+vm_hook() {
+    # Bật tự động mở rộng filesystem cho VM
+    echo 'growfs_enable="YES"' >> ${1}/etc/rc.conf.local
+}
+```
+
+---
+
+## Cấu trúc dự án
+
+```
+.
+├── Makefile              # Điểm vào chính — điều phối tới build/ và composite/
+├── CLAUDE.md             # Hướng dẫn cho Claude Code AI assistant
+├── README.md             # Tệp bạn đang đọc
+├── LICENSE               # Giấy phép BSD 2-Clause
+├── .gitignore            # Loại trừ tệp cục bộ và khoá ký
+│
+├── build/                # Script build từng giai đoạn (43 script)
+│   ├── common.sh         # ★ Tệp quan trọng nhất — hàm dùng chung, parse tuỳ chọn,
+│   │                     #   git helpers, setup chroot/base/kernel/packages
+│   ├── base.sh           # Build userland FreeBSD
+│   ├── kernel.sh         # Build kernel
+│   ├── ports.sh          # Build ports
+│   ├── plugins.sh        # Build plugins
+│   ├── core.sh           # Đóng gói core
+│   ├── dvd.sh            # Tạo image ISO
+│   ├── nano.sh           # Tạo image flash
+│   ├── serial.sh         # Tạo image serial memstick
+│   ├── vga.sh            # Tạo image VGA memstick
+│   ├── vm.sh             # Tạo image VM
+│   ├── arm.sh            # Tạo image ARM
+│   ├── audit.sh          # Kiểm tra lỗ hổng bảo mật
+│   ├── sign.sh           # Ký số package
+│   ├── verify.sh         # Xác minh chữ ký
+│   ├── test.sh           # Kiểm thử
+│   └── ...               # 27 script phụ trợ khác
+│
+├── composite/            # Script tự động hoá đa giai đoạn
+│   ├── nightly.sh        # Build hàng đêm tự động
+│   ├── distribution.sh   # Build phát hành chính thức
+│   ├── hotfix.sh         # Build sửa lỗi nhanh
+│   ├── factory.sh        # Build image thiết bị nhúng
+│   ├── custom.sh         # Build image tuỳ chỉnh
+│   ├── util.sh           # Hàm helper: load_core_version(), load_make_vars()
+│   ├── watch.sh          # Theo dõi trạng thái build
+│   └── pkgver.sh         # Kiểm tra phiên bản package
+│
+├── config/               # Cấu hình build theo phiên bản ABI
+│   └── 26.1/             # Cấu hình cho FreeBSD 14.3, phiên bản 26.1
+│
+├── device/               # Cấu hình và hook theo thiết bị
+│   ├── A10.conf          # Deciso NetBoard A10
+│   ├── ARM64.conf        # ARM64 chung (QEMU/ESXi)
+│   ├── R4S.conf          # NanoPi R4S
+│   ├── ROCKPRO64.conf    # RockPro64
+│   └── RPI.conf          # Raspberry Pi 3/4/CM4
+│
+└── scripts/              # Script tiện ích
+    ├── pkg_sign.sh       # Wrapper ký package
+    ├── pkg_fingerprint.sh # Hiển thị fingerprint khoá ký
+    └── parse_ports_log.py # Phân tích log build ports (Python)
+```
+
+---
+
+## Giấy phép
+
+BSD 2-Clause. Xem [LICENSE](LICENSE).

@@ -1,0 +1,54 @@
+# ==============================================================================
+# OT-SA-Tools Mirror Configuration (ABI 26.1)
+# ==============================================================================
+#
+# >>> ĐÂY LÀ FILE TEMPLATE - COPY THÀNH `mirrors.yaml` ĐỂ DÙNG <<<
+#
+# Cách dùng:
+#   cp mirrors.yaml.example mirrors.yaml
+#   vim mirrors.yaml
+#
+# File `mirrors.yaml` KHÔNG được commit vào git.
+#
+# ------------------------------------------------------------------------------
+# Mirror servers cho prefetch và clone
+# ------------------------------------------------------------------------------
+# Dùng khi chạy:
+#   make prefetch-base,kernel,packages
+#   make clone-base,kernel,packages TO=26.1
+#
+# Mirror đầu tiên trong danh sách sẽ được ưu tiên dùng.
+#
+# Ưu tiên ghi đè (cao → thấp):
+#   1. Command line:    make -m "https://custom.mirror"
+#   2. File này:        danh sách mirrors
+#   3. Makefile default: 6 OPNsense mirrors
+# ==============================================================================
+
+
+mirrors:
+  - https://opnsense.c0urier.net
+  - https://mirrors.nycbug.org/pub/opnsense
+  - https://mirror.wdc1.us.leaseweb.net/opnsense
+  - https://mirror.sfo12.us.leaseweb.net/opnsense
+  - https://mirror.fra10.de.leaseweb.net/opnsense
+  - https://mirror.ams1.nl.leaseweb.net/opnsense
+
+
+# ==============================================================================
+# VÍ DỤ TUỲ CHỈNH
+# ==============================================================================
+#
+# Ví dụ 1: Mirror nội bộ
+# ------------------------------------------------------------------------------
+# mirrors:
+#   - https://mirror.internal.local/otsa
+#   - https://backup.mirror.local/otsa
+#
+#
+# Ví dụ 2: CDN riêng
+# ------------------------------------------------------------------------------
+# mirrors:
+#   - https://cdn.ot-project.com/builds
+#   - https://fallback.ot-project.com/builds
+# ==============================================================================

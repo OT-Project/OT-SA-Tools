@@ -1,4 +1,11 @@
+# Local build configuration overrides
 /config/*/build.conf.local
 /config/*/plugins.conf.local
+
+# Repository configuration (có thể chứa private URLs)
+/config/*/repositories.yaml
+/config/*/mirrors.yaml
+
+# Signing keys (NEVER commit)
 /config/*/repo.key
 /config/*/repo.pub
